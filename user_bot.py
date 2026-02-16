@@ -339,4 +339,4 @@ try:
     app.run()
     print("✅ User Bot is running!")
 except Exception as e:
-    print(f"❌ Bot failed: {e}")
+    print(f"❌ Bot failed: {e}") 
