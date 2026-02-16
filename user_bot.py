@@ -1,346 +1,259 @@
 # -*- coding: utf-8 -*-
 """
-USER BOT (DUAL SYSTEM)
-Ye code DONO user bots ke liye use hoga (Primary + Backup)
-Sirf token alag hoga, baaki sab same!
+USER BOT - COMPLETE STANDALONE VERSION
+Works for both Primary & Backup (BOT_MODE env variable se decide hoga)
 """
 
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pymongo import MongoClient
 import asyncio
 import requests
 from datetime import datetime
 import os
 
-import config
-import database as db
+# ========== CONFIG ==========
+API_ID = 37067823
+API_HASH = "ed9e62ed4538d2d2b835fb54529c358f"
 
-# ========== BOT TOKEN DECIDE KARO ==========
-# Environment variable se check karo kaun sa bot hai
-BOT_MODE = os.environ.get("BOT_MODE", "primary")  # Default: primary
+# Bot mode decide karo (Railway environment variable se)
+BOT_MODE = os.environ.get("BOT_MODE", "primary")
 
-if BOT_MODE == "primary":
-    BOT_TOKEN = config.USER_BOT_PRIMARY_TOKEN
-    BOT_NAME = "PRIMARY"
-    print("🤖 Running as: PRIMARY USER BOT")
-elif BOT_MODE == "backup":
-    BOT_TOKEN = config.USER_BOT_BACKUP_TOKEN
-    BOT_NAME = "BACKUP"
-    print("🤖 Running as: BACKUP USER BOT")
+if BOT_MODE == "backup":
+    BOT_TOKEN = "7788869673:AAHheU98TueCNHmfOf6GERSHWEp9QwETyho"
+    print("🤖 MODE: BACKUP BOT")
 else:
-    # Fallback to primary
-    BOT_TOKEN = config.USER_BOT_PRIMARY_TOKEN
-    BOT_NAME = "PRIMARY (Fallback)"
-    print("⚠️ Invalid BOT_MODE, using PRIMARY")
+    BOT_TOKEN = "8537476620:AAHf1XxjpjFGJICxNAQ4i9A06gN0Z0ephDk"
+    print("🤖 MODE: PRIMARY BOT")
+
+CHANNEL_ID = -1003777551559
+MONGO_URL = "mongodb+srv://Ajeet:XgGFRFWVT2NwWipw@cluster0.3lxz0p7.mongodb.net/?appName=Cluster0"
+SHORTENER_API = "5cbb1b2088d2ed06d7e9feae35dc17cc033169d6"
+SHORTENER_URL = "https://vplink.in"
+
+# Settings
+VERIFICATION_HOURS = 26
+FREE_DAILY_LIMIT = 1
+AUTO_DELETE_HOURS = 2
+HELP_CHANNEL = "https://t.me/fillings4you"
 
 print("=" * 60)
-print(f"🤖 USER BOT STARTING ({BOT_NAME})...")
-print(f"⏰ Verification: {config.VERIFICATION_HOURS} hours")
-print(f"🎁 Daily free: {config.FREE_DAILY_LIMIT} videos")
-print(f"🗑️ Auto-delete: {config.AUTO_DELETE_HOURS} hours")
+print(f"🤖 USER BOT STARTING ({BOT_MODE.upper()})...")
+print(f"⏰ Verification: {VERIFICATION_HOURS}hrs")
+print(f"🎁 Free daily: {FREE_DAILY_LIMIT}")
 print("=" * 60)
 
-# ========== BOT INITIALIZE ==========
-app = Client(
-    f"UserBot_{BOT_NAME}",
-    api_id=config.API_ID,
-    api_hash=config.API_HASH,
-    bot_token=BOT_TOKEN
-)
+# ========== DATABASE ==========
+try:
+    client = MongoClient(MONGO_URL, serverSelectionTimeoutMS=5000)
+    db = client['fileshare_dual']
+    videos_db = db['videos']
+    users_db = db['users']
+    daily_usage_db = db['daily_usage']
+    print("✅ Database connected!")
+except Exception as e:
+    print(f"❌ Database error: {e}")
+    videos_db = None
+    users_db = None
+    daily_usage_db = None
 
-# ========== HELPER FUNCTIONS ==========
+# ========== BOT ==========
+app = Client(f"UserBot_{BOT_MODE}", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-def shorten_url(url):
-    """VPLinks se URL short karta hai"""
+# ========== FUNCTIONS ==========
+
+def shorten(url):
     try:
-        api_url = f"{config.SHORTENER_URL}/api?api={config.SHORTENER_API}&url={url}"
-        response = requests.get(api_url, timeout=10).json()
-        
-        if response.get("status") == "success":
-            return response.get("shortenedUrl", url)
-        return url
-    except Exception as e:
-        print(f"Shortener error: {e}")
+        r = requests.get(f"{SHORTENER_URL}/api?api={SHORTENER_API}&url={url}", timeout=10).json()
+        return r.get("shortenedUrl", url)
+    except:
         return url
 
-async def auto_delete_message(chat_id, message_id, hours):
-    """Message ko specified hours ke baad delete karta hai"""
+async def auto_delete(chat_id, msg_id, hours):
     try:
-        # Wait karo specified hours ke liye
         await asyncio.sleep(hours * 3600)
-        
-        # Message delete karo
-        await app.delete_messages(chat_id=chat_id, message_ids=message_id)
-        
-        print(f"🗑️ Auto-deleted message {message_id} from chat {chat_id}")
-        
+        await app.delete_messages(chat_id, msg_id)
+        print(f"🗑️ Deleted message {msg_id}")
     except Exception as e:
-        print(f"❌ Auto-delete error: {e}")
+        print(f"Delete error: {e}")
 
-# ========== START COMMAND ==========
+def add_user(uid, username, fname):
+    try:
+        if not users_db.find_one({"user_id": uid}):
+            users_db.insert_one({
+                "user_id": uid,
+                "username": username,
+                "first_name": fname,
+                "verified_at": None,
+                "joined_at": datetime.now()
+            })
+    except:
+        pass
+
+def is_verified(uid):
+    try:
+        u = users_db.find_one({"user_id": uid})
+        if not u or not u.get("verified_at"):
+            return False
+        diff = (datetime.now() - u["verified_at"]).total_seconds()
+        return diff < (VERIFICATION_HOURS * 3600)
+    except:
+        return False
+
+def verify_user(uid):
+    try:
+        users_db.update_one({"user_id": uid}, {"$set": {"verified_at": datetime.now()}})
+    except:
+        pass
+
+def get_daily_usage(uid):
+    try:
+        today = datetime.now().date()
+        u = daily_usage_db.find_one({"user_id": uid, "date": today})
+        return u.get("count", 0) if u else 0
+    except:
+        return 0
+
+def increment_daily(uid):
+    try:
+        today = datetime.now().date()
+        daily_usage_db.update_one(
+            {"user_id": uid, "date": today},
+            {"$inc": {"count": 1}},
+            upsert=True
+        )
+    except:
+        pass
+
+def can_use_free(uid):
+    return get_daily_usage(uid) < FREE_DAILY_LIMIT
+
+def get_video(vid_id):
+    try:
+        return videos_db.find_one({"video_id": vid_id})
+    except:
+        return None
+
+def increment_downloads(vid_id):
+    try:
+        videos_db.update_one({"video_id": vid_id}, {"$inc": {"downloads": 1}})
+    except:
+        pass
+
+# ========== COMMANDS ==========
 
 @app.on_message(filters.command("start") & filters.private & ~filters.bot)
-async def start_handler(client, message):
-    """
-    Start command handler
-    - Adult warning dikha
-    - User add karo database mein
-    - Video request handle karo
-    - Verification handle karo
-    """
-    user_id = message.from_user.id
-    print(f"📥 /start from user: {user_id}")
+async def start(c, m):
+    uid = m.from_user.id
+    print(f"📥 /start from {uid}")
     
-    # User ko database mein add karo (agar naya hai)
-    db.add_user(
-        user_id=user_id,
-        username=message.from_user.username,
-        first_name=message.from_user.first_name
-    )
+    add_user(uid, m.from_user.username, m.from_user.first_name)
     
-    # Check karo agar video request hai (link ke saath aaya)
-    if len(message.text.split()) > 1:
-        code = message.text.split()[1]
-        print(f"📹 Video request: {code}")
+    if len(m.text.split()) > 1:
+        code = m.text.split()[1]
         
-        # ========== VERIFICATION CALLBACK HANDLE ==========
+        # Verify callback
         if code.startswith("verify_"):
-            db.verify_user(user_id)
-            
-            await message.reply(
-                f"🎉 **Verification Successful!**\n\n"
-                f"✅ Aapko **{config.VERIFICATION_HOURS} hours** ka unlimited access mil gaya!\n\n"
-                f"📹 Ab aap unlimited videos download kar sakte ho.\n"
-                f"⏰ Access {config.VERIFICATION_HOURS} hours baad expire hoga.\n\n"
-                f"Thank you for verifying! 😊"
+            verify_user(uid)
+            await m.reply(
+                f"🎉 **Verified!**\n\n"
+                f"✅ {VERIFICATION_HOURS} hours unlimited access!"
             )
-            print(f"✅ User {user_id} verified successfully")
             return
         
-        # ========== VIDEO REQUEST HANDLE ==========
+        # Video request
+        verified = is_verified(uid)
+        free = can_use_free(uid)
         
-        # Check user ka access status
-        is_verified = db.is_user_verified(user_id)
-        can_free = db.can_use_free_daily(user_id)
-        
-        print(f"User {user_id} status: verified={is_verified}, can_free={can_free}")
-        
-        # Agar verified nahi aur free bhi use kar chuka
-        if not is_verified and not can_free:
-            bot_username = (await client.get_me()).username
-            verify_url = f"https://t.me/{bot_username}?start=verify_{user_id}"
-            short_link = shorten_url(verify_url)
+        if not verified and not free:
+            bot_un = (await c.get_me()).username
+            link = shorten(f"https://t.me/{bot_un}?start=verify_{uid}")
             
-            print(f"🔐 Verification required for user {user_id}")
-            
-            await message.reply(
+            await m.reply(
                 f"🔐 **Verification Required**\n\n"
-                f"⚠️ Aapne aaj ka free video use kar liya!\n\n"
-                f"✅ **{config.VERIFICATION_HOURS} hours** unlimited access ke liye verify karein:\n\n"
-                f"👇 Neeche diye buttons use karein:",
+                f"⚠️ Daily limit used!\n\n"
+                f"Verify for {VERIFICATION_HOURS}hrs access:",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("✅ Verify Now", url=short_link)],
-                    [InlineKeyboardButton("❓ How to Verify?", url=config.HELP_CHANNEL)]
+                    [InlineKeyboardButton("✅ Verify", url=link)],
+                    [InlineKeyboardButton("❓ How to Verify?", url=HELP_CHANNEL)]
                 ])
             )
             return
         
-        # Video data nikalo database se
-        video_data = db.get_video(code)
-        
-        if not video_data:
-            print(f"❌ Video {code} not found in database")
-            await message.reply(
-                "❌ **Video Not Found!**\n\n"
-                "Ye link invalid hai ya expire ho gaya hai.\n\n"
-                "Please check the link and try again."
-            )
+        vid = get_video(code)
+        if not vid:
+            await m.reply("❌ Video not found!")
             return
         
-        # ========== VIDEO SEND KARO ==========
         try:
-            print(f"📤 Sending video {code} to user {user_id}")
+            if not verified and free:
+                increment_daily(uid)
             
-            # Agar free use kar raha hai to count badhao
-            if not is_verified and can_free:
-                db.increment_daily_usage(user_id)
-                print(f"🎁 Free daily video used by user {user_id}")
-            
-            # Video send karo with PROTECTION
-            sent_message = await client.copy_message(
-                chat_id=message.chat.id,
-                from_chat_id=config.CHANNEL_ID,
-                message_id=video_data['message_id'],
-                protect_content=True,  # 🔒 Save/Forward DISABLED!
+            sent = await c.copy_message(
+                m.chat.id,
+                CHANNEL_ID,
+                vid['message_id'],
+                protect_content=True,
                 caption=(
-                    f"⚠️ **AUTO-DELETE WARNING**\n\n"
-                    f"📹 Ye video **{config.AUTO_DELETE_HOURS} hours** mein automatically delete ho jayega!\n\n"
-                    f"⏰ Please pehle dekh lein.\n\n"
-                    f"🔒 **Protection Active:**\n"
-                    f"• Save disabled ❌\n"
-                    f"• Forward disabled ❌\n"
-                    f"• Download kar ke dekh sakte ho ✅"
+                    f"⚠️ **AUTO-DELETE in {AUTO_DELETE_HOURS}hrs!**\n\n"
+                    f"🔒 Save/Forward disabled"
                 )
             )
             
-            print(f"✅ Video sent! Message ID: {sent_message.id}")
-            
-            # Database stats update karo
-            db.increment_download(code)
-            db.increment_user_downloads(user_id)
-            
-            # AUTO-DELETE SCHEDULE KARO
-            print(f"🗑️ Scheduling auto-delete for {config.AUTO_DELETE_HOURS} hours...")
-            asyncio.create_task(
-                auto_delete_message(message.chat.id, sent_message.id, config.AUTO_DELETE_HOURS)
-            )
-            
-            print(f"✅ Auto-delete task scheduled successfully!")
-            
-            # Agar free video use kiya to reminder bhejo
-            if not is_verified and can_free:
-                await message.reply(
-                    f"🎁 **Free Daily Video Used!**\n\n"
-                    f"Aapne aaj ka free video use kar liya.\n\n"
-                    f"💡 **Want unlimited access?**\n"
-                    f"Verify karein aur {config.VERIFICATION_HOURS} hours unlimited videos paayen!",
-                    reply_markup=InlineKeyboardMarkup([[
-                        InlineKeyboardButton(
-                            "✅ Verify Now",
-                            url=shorten_url(f"https://t.me/{(await client.get_me()).username}?start=verify_{user_id}")
-                        )
-                    ]])
-                )
+            increment_downloads(code)
+            asyncio.create_task(auto_delete(m.chat.id, sent.id, AUTO_DELETE_HOURS))
             
         except Exception as e:
-            print(f"❌ Error sending video: {e}")
-            await message.reply(
-                f"❌ **Error Occurred!**\n\n"
-                f"Video send karne mein error aaya.\n\n"
-                f"Error: `{str(e)}`\n\n"
-                f"Please contact admin."
-            )
+            await m.reply(f"❌ Error: {e}")
     
     else:
-        # ========== NORMAL START (NO VIDEO REQUEST) ==========
-        
-        # User ka daily usage check karo
-        daily_left = config.FREE_DAILY_LIMIT - db.get_daily_usage(user_id)
-        
-        # Adult warning + Welcome message
-        await message.reply(config.ADULT_WARNING)
-        
-        await asyncio.sleep(1)  # Thoda gap
-        
-        welcome_text = config.WELCOME_MESSAGE.format(
-            name=message.from_user.first_name,
-            left=daily_left,
-            total=config.FREE_DAILY_LIMIT
+        # Adult warning
+        await m.reply(
+            "⚠️ **18+ ADULT WARNING** ⚠️\n\n"
+            "18 saal se kam umr wale please leave karein.\n\n"
+            "Continue?"
         )
         
-        await message.reply(
-            welcome_text,
+        await asyncio.sleep(1)
+        
+        left = FREE_DAILY_LIMIT - get_daily_usage(uid)
+        await m.reply(
+            f"👋 Welcome {m.from_user.first_name}!\n\n"
+            f"🎁 Daily free: {left}/{FREE_DAILY_LIMIT}\n\n"
+            f"📌 Features:\n"
+            f"• {FREE_DAILY_LIMIT} free video daily\n"
+            f"• {VERIFICATION_HOURS}hr access\n"
+            f"• Auto-delete {AUTO_DELETE_HOURS}hr\n\n"
+            f"❓ /help",
             reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("❓ How to Verify?", url=config.HELP_CHANNEL)
+                InlineKeyboardButton("❓ How to Verify?", url=HELP_CHANNEL)
             ]])
         )
 
-# ========== HELP COMMAND ==========
-
 @app.on_message(filters.command("help") & filters.private & ~filters.bot)
-async def help_handler(client, message):
-    """Help guide dikhata hai"""
-    await message.reply(config.HELP_TEXT)
-
-# ========== MYSTATS COMMAND ==========
+async def help_cmd(c, m):
+    await m.reply(
+        f"📖 **Guide**\n\n"
+        f"🎁 {FREE_DAILY_LIMIT} free daily\n"
+        f"✅ Verify for {VERIFICATION_HOURS}hr access\n"
+        f"🗑️ Auto-delete: {AUTO_DELETE_HOURS}hr\n"
+        f"🔒 Protected content\n\n"
+        f"Guide: {HELP_CHANNEL}"
+    )
 
 @app.on_message(filters.command("mystats") & filters.private & ~filters.bot)
-async def stats_handler(client, message):
-    """User ka personal stats dikhata hai"""
-    user_id = message.from_user.id
-    user = db.get_user(user_id)
+async def stats(c, m):
+    uid = m.from_user.id
+    verified = is_verified(uid)
+    used = get_daily_usage(uid)
     
-    if not user:
-        await message.reply("❌ Data nahi mila!")
-        return
+    status = f"✅ Verified" if verified else f"🎁 Free ({FREE_DAILY_LIMIT - used} left)"
     
-    total_downloads = user.get("total_downloads", 0)
-    joined_date = user.get("joined_at", datetime.now())
-    daily_used = db.get_daily_usage(user_id)
-    is_verified = db.is_user_verified(user_id)
-    
-    # Status text banao
-    if is_verified:
-        verify_time = user.get("verified_at")
-        time_passed = (datetime.now() - verify_time).total_seconds() / 3600
-        remaining = config.VERIFICATION_HOURS - time_passed
-        
-        status_text = (
-            f"✅ **Verified**\n"
-            f"⏰ Remaining: {remaining:.1f} hours\n"
-            f"🎁 Unlimited access active!"
-        )
-    else:
-        left = config.FREE_DAILY_LIMIT - daily_used
-        status_text = (
-            f"🎁 **Free Mode**\n"
-            f"📹 Videos left today: {left}/{config.FREE_DAILY_LIMIT}\n"
-            f"⚠️ Verification pending"
-        )
-    
-    await message.reply(
-        f"📊 **Your Statistics**\n\n"
-        f"👤 **User:** {message.from_user.first_name}\n"
-        f"🆔 **ID:** `{user_id}`\n\n"
-        f"**Status:**\n{status_text}\n\n"
-        f"📥 **Total Downloads:** {total_downloads}\n"
-        f"📆 **Today's Usage:** {daily_used}/{config.FREE_DAILY_LIMIT}\n"
-        f"🗓️ **Member Since:** {joined_date.strftime('%d %b %Y')}\n\n"
-        f"💡 Want unlimited access?\n"
-        f"Verify for {config.VERIFICATION_HOURS} hours!",
-        reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton(
-                "✅ Verify Now",
-                url=shorten_url(f"https://t.me/{(await client.get_me()).username}?start=verify_{user_id}")
-            )
-        ]])
+    await m.reply(
+        f"📊 **Your Stats**\n\n"
+        f"Status: {status}\n"
+        f"Today: {used}/{FREE_DAILY_LIMIT}"
     )
 
-# ========== ABOUT COMMAND ==========
-
-@app.on_message(filters.command("about") & filters.private & ~filters.bot)
-async def about_handler(client, message):
-    """Bot ke baare mein info"""
-    bot_info = await client.get_me()
-    
-    await message.reply(
-        f"ℹ️ **About This Bot**\n\n"
-        f"🤖 **Bot:** @{bot_info.username}\n"
-        f"📦 **Type:** Premium Video Sharing\n"
-        f"🔐 **Security:** Protected Content\n"
-        f"⚡ **Speed:** Fast Delivery\n"
-        f"💯 **Reliability:** 24/7 Uptime\n\n"
-        f"**Features:**\n"
-        f"• {config.FREE_DAILY_LIMIT} free video daily\n"
-        f"• {config.VERIFICATION_HOURS}hr verification access\n"
-        f"• Auto-delete after {config.AUTO_DELETE_HOURS}hrs\n"
-        f"• Save/Forward protected\n"
-        f"• Secure storage\n\n"
-        f"**Our Mission:**\n"
-        f"Provide fast, secure, and free video sharing service!\n\n"
-        f"Thank you for using! ❤️"
-    )
-
-# ========== RUN BOT ==========
-print(f"🚀 Starting {BOT_NAME} User Bot...")
-print("⏳ Connecting to Telegram...")
-
-try:
-    app.run()
-    print(f"✅ {BOT_NAME} User Bot is running!")
-except KeyboardInterrupt:
-    print(f"⏹️ {BOT_NAME} User Bot stopped by user")
-except Exception as e:
-    print(f"❌ {BOT_NAME} User Bot error: {e}")
-    import traceback
-    traceback.print_exc()
+print("🚀 Starting...")
+app.run()
