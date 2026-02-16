@@ -148,4 +148,43 @@ async def upload_file(c, m):
         await status.edit(f"❌ Error: {e}")
 
 print("🚀 Starting Admin Bot...")
+@app.on_message(filters.command("broadcast") & filters.private)
+async def broadcast_message(c, m):
+    if m.from_user.id != OWNER_ID:
+        return
+    
+    if len(m.text.split(None, 1)) < 2:
+        await m.reply(
+            "📢 **Broadcast Message**\n\n"
+            "**Usage:**\n"
+            "`/broadcast Your message here`\n\n"
+            "**Example:**\n"
+            "`/broadcast 🎉 New movies uploaded! Check now!`\n\n"
+            "This will send message to ALL users!"
+        )
+        return
+    
+    broadcast_text = m.text.split(None, 1)[1]
+    
+    status = await m.reply("📤 **Broadcasting...**\n\n⏳ Please wait...")
+    
+    all_users = users.find()
+    success = 0
+    failed = 0
+    
+    for user in all_users:
+        try:
+            await c.send_message(user["user_id"], broadcast_text)
+            success += 1
+            await asyncio.sleep(0.05)  # Avoid flood
+        except Exception as e:
+            failed += 1
+            print(f"Failed to send to {user['user_id']}: {e}")
+    
+    await status.edit(
+        f"📢 **Broadcast Complete!**\n\n"
+        f"✅ Success: {success}\n"
+        f"❌ Failed: {failed}\n"
+        f"📊 Total: {success + failed}"
+    )
 app.run()
