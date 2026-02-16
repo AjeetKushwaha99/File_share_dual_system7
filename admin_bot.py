@@ -1,297 +1,232 @@
 # -*- coding: utf-8 -*-
 """
-ADMIN BOT
-Video upload, link generation, broadcast functionality
+ADMIN BOT - COMPLETE STANDALONE VERSION
+Sab kuch ek hi file mein - Railway friendly!
 """
 
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pymongo import MongoClient
 import hashlib
 from datetime import datetime
 import asyncio
 
-import config
-import database as db
+# ========== CONFIG ==========
+API_ID = 37067823
+API_HASH = "ed9e62ed4538d2d2b835fb54529c358f"
+ADMIN_BOT_TOKEN = "8596951434:AAF98nta7kfLKqeR9ImT5pUCTZoZ1rLFOwI"
+CHANNEL_ID = -1003777551559
+OWNER_ID = 6549083920
+MONGO_URL = "mongodb+srv://Ajeet:XgGFRFWVT2NwWipw@cluster0.3lxz0p7.mongodb.net/?appName=Cluster0"
+
+# Bot settings
+PRIMARY_BOT_USERNAME = "Filling4You_bot"
+BACKUP_BOT_USERNAME = "FiLing4YoU_bot"
 
 print("=" * 60)
 print("🤖 ADMIN BOT STARTING...")
-print(f"👑 Owner ID: {config.OWNER_ID}")
-print(f"📁 Channel ID: {config.CHANNEL_ID}")
-print(f"🎯 Active User Bot: {config.ACTIVE_USER_BOT}")
+print(f"👑 Owner: {OWNER_ID}")
+print(f"📁 Channel: {CHANNEL_ID}")
 print("=" * 60)
 
-# ========== BOT INITIALIZE ==========
-app = Client(
-    "AdminBot",
-    api_id=config.API_ID,
-    api_hash=config.API_HASH,
-    bot_token=config.ADMIN_BOT_TOKEN
-)
+# ========== DATABASE ==========
+try:
+    client = MongoClient(MONGO_URL, serverSelectionTimeoutMS=5000)
+    db = client['fileshare_dual']
+    videos_db = db['videos']
+    users_db = db['users']
+    settings_db = db['settings']
+    print("✅ Database connected!")
+except Exception as e:
+    print(f"❌ Database error: {e}")
+    # Continue without database for now
+    videos_db = None
+    users_db = None
+    settings_db = None
 
-# ========== HELPER FUNCTIONS ==========
+# ========== BOT ==========
+app = Client("AdminBot", api_id=API_ID, api_hash=API_HASH, bot_token=ADMIN_BOT_TOKEN)
 
-def generate_video_id():
-    """Unique 8-character video ID generate karta hai"""
-    timestamp = str(datetime.now().timestamp())
-    return hashlib.md5(timestamp.encode()).hexdigest()[:8]
+# ========== FUNCTIONS ==========
 
-def get_bot_username_for_link():
-    """Active bot ka username link ke liye"""
-    active_bot = db.get_active_bot()
-    if active_bot == "primary":
-        return config.PRIMARY_BOT_USERNAME
-    else:
-        return config.BACKUP_BOT_USERNAME
+def generate_id():
+    return hashlib.md5(str(datetime.now().timestamp()).encode()).hexdigest()[:8]
+
+def get_active_bot():
+    try:
+        s = settings_db.find_one({"key": "active_bot"})
+        return s['value'] if s else "primary"
+    except:
+        return "primary"
+
+def set_active_bot(bot):
+    try:
+        settings_db.update_one({"key": "active_bot"}, {"$set": {"value": bot}}, upsert=True)
+        return True
+    except:
+        return False
+
+def get_bot_username():
+    active = get_active_bot()
+    return PRIMARY_BOT_USERNAME if active == "primary" else BACKUP_BOT_USERNAME
 
 # ========== COMMANDS ==========
 
 @app.on_message(filters.command("start") & filters.private)
-async def admin_start(client, message):
-    """Start command - admin panel dikhata hai"""
-    if message.from_user.id != config.OWNER_ID:
-        await message.reply("🔐 **Private Admin Bot**\n\nOnly owner can access.")
+async def start(c, m):
+    if m.from_user.id != OWNER_ID:
+        await m.reply("🔐 Admin only")
         return
     
-    await message.reply(
-        "👑 **Admin Control Panel**\n\n"
-        "📤 **Upload Video:**\n"
-        "Simply send video file to get share link\n\n"
-        "📊 **Commands:**\n"
-        "/stats - Bot statistics\n"
-        "/switch - Switch user bot (primary/backup)\n"
-        "/broadcast - Send message to all users\n"
-        "/info - System information\n"
-        "/help - Admin help guide"
+    await m.reply(
+        "👑 **Admin Panel**\n\n"
+        "📤 Send video to upload\n\n"
+        "**Commands:**\n"
+        "/stats - Statistics\n"
+        "/switch - Switch bot\n"
+        "/broadcast - Broadcast message\n"
+        "/info - System info"
     )
 
 @app.on_message(filters.command("stats") & filters.private)
-async def admin_stats(client, message):
-    """Bot statistics dikhata hai"""
-    if message.from_user.id != config.OWNER_ID:
+async def stats(c, m):
+    if m.from_user.id != OWNER_ID:
         return
     
-    total_users = db.get_total_users()
-    verified_users = db.get_verified_users()
-    total_videos = db.get_total_videos()
-    active_bot = db.get_active_bot()
+    try:
+        total_videos = videos_db.count_documents({})
+        total_users = users_db.count_documents({})
+    except:
+        total_videos = 0
+        total_users = 0
     
-    await message.reply(
-        f"📊 **Bot Statistics**\n\n"
-        f"👥 **Total Users:** `{total_users}`\n"
-        f"✅ **Verified Users:** `{verified_users}`\n"
-        f"📹 **Total Videos:** `{total_videos}`\n\n"
-        f"🤖 **Active User Bot:** `{active_bot}`\n"
-        f"💾 **Database:** Connected ✅\n"
-        f"📡 **Status:** Active 🟢"
+    await m.reply(
+        f"📊 **Stats**\n\n"
+        f"📹 Videos: {total_videos}\n"
+        f"👥 Users: {total_users}\n"
+        f"🤖 Active: @{get_bot_username()}"
     )
 
 @app.on_message(filters.command("switch") & filters.private)
-async def switch_bot(client, message):
-    """User bot switch karta hai (primary/backup)"""
-    if message.from_user.id != config.OWNER_ID:
+async def switch(c, m):
+    if m.from_user.id != OWNER_ID:
         return
     
-    args = message.text.split()
-    
+    args = m.text.split()
     if len(args) < 2:
-        current = db.get_active_bot()
-        await message.reply(
-            f"🔄 **Switch User Bot**\n\n"
-            f"Current active: `{current}`\n\n"
-            f"**Usage:**\n"
-            f"`/switch primary` - Primary bot activate\n"
-            f"`/switch backup` - Backup bot activate\n\n"
-            f"**Bot Names:**\n"
-            f"• primary = @{config.PRIMARY_BOT_USERNAME}\n"
-            f"• backup = @{config.BACKUP_BOT_USERNAME}"
+        await m.reply(
+            f"🔄 **Switch Bot**\n\n"
+            f"Current: @{get_bot_username()}\n\n"
+            f"Usage:\n"
+            f"`/switch primary`\n"
+            f"`/switch backup`"
         )
         return
     
     new_bot = args[1].lower()
-    
     if new_bot not in ["primary", "backup"]:
-        await message.reply("❌ Invalid option! Use: primary or backup")
+        await m.reply("❌ Use: primary or backup")
         return
     
-    db.set_active_bot(new_bot)
+    set_active_bot(new_bot)
+    bot_name = PRIMARY_BOT_USERNAME if new_bot == "primary" else BACKUP_BOT_USERNAME
     
-    bot_username = config.PRIMARY_BOT_USERNAME if new_bot == "primary" else config.BACKUP_BOT_USERNAME
-    
-    await message.reply(
-        f"✅ **Bot Switched Successfully!**\n\n"
-        f"🆕 Active Bot: `{new_bot}`\n"
-        f"🤖 Username: @{bot_username}\n\n"
-        f"All new video links will use this bot!"
-    )
+    await m.reply(f"✅ Switched to @{bot_name}")
 
 @app.on_message(filters.command("broadcast") & filters.private)
-async def broadcast(client, message):
-    """Sabhi users ko message bhejta hai"""
-    if message.from_user.id != config.OWNER_ID:
+async def broadcast(c, m):
+    if m.from_user.id != OWNER_ID:
         return
     
-    # Check agar message ka reply hai
-    if not message.reply_to_message:
-        await message.reply(
-            "📢 **Broadcast Message**\n\n"
-            "**Usage:**\n"
-            "Jis message ko broadcast karna hai, usko reply karo aur type karo:\n"
-            "`/broadcast`\n\n"
-            "Bot automatically us message ko sabko bhej dega!"
+    if not m.reply_to_message:
+        await m.reply(
+            "📢 **Broadcast**\n\n"
+            "Reply to a message with `/broadcast`"
         )
         return
     
-    broadcast_message = message.reply_to_message
+    status = await m.reply("📤 Broadcasting...")
     
-    status_msg = await message.reply("📤 **Broadcasting...**\n\n⏳ Please wait...")
+    try:
+        user_ids = [u["user_id"] for u in users_db.find({}, {"user_id": 1})]
+    except:
+        await status.edit("❌ Database error!")
+        return
     
-    user_ids = db.get_all_user_ids()
     success = 0
     failed = 0
-    blocked = 0
     
-    for user_id in user_ids:
+    for uid in user_ids:
         try:
-            await broadcast_message.copy(user_id)
+            await m.reply_to_message.copy(uid)
             success += 1
-            
-            # Flood avoid ke liye thoda delay
             await asyncio.sleep(0.05)
-            
-        except Exception as e:
-            error_text = str(e).lower()
-            
-            if "blocked" in error_text or "user is deactivated" in error_text:
-                blocked += 1
-            else:
-                failed += 1
-            
-            print(f"Broadcast failed for {user_id}: {e}")
+        except:
+            failed += 1
     
-    await status_msg.edit(
-        f"📢 **Broadcast Complete!**\n\n"
-        f"✅ Success: `{success}`\n"
-        f"🚫 Blocked: `{blocked}`\n"
-        f"❌ Failed: `{failed}`\n"
-        f"📊 Total: `{len(user_ids)}`"
+    await status.edit(
+        f"📢 **Complete!**\n\n"
+        f"✅ Success: {success}\n"
+        f"❌ Failed: {failed}"
     )
 
 @app.on_message(filters.command("info") & filters.private)
-async def system_info(client, message):
-    """System information dikhata hai"""
-    if message.from_user.id != config.OWNER_ID:
+async def info(c, m):
+    if m.from_user.id != OWNER_ID:
         return
     
-    active_bot = db.get_active_bot()
-    active_username = get_bot_username_for_link()
-    
-    await message.reply(
-        f"ℹ️ **System Information**\n\n"
-        f"**Bots:**\n"
-        f"🤖 Admin: @{(await client.get_me()).username}\n"
-        f"📦 Primary: @{config.PRIMARY_BOT_USERNAME}\n"
-        f"🔄 Backup: @{config.BACKUP_BOT_USERNAME}\n\n"
-        f"**Active:**\n"
-        f"🎯 Mode: `{active_bot}`\n"
-        f"🤖 Bot: @{active_username}\n\n"
-        f"**Settings:**\n"
-        f"⏰ Verification: {config.VERIFICATION_HOURS} hours\n"
-        f"🎁 Daily free: {config.FREE_DAILY_LIMIT} videos\n"
-        f"🗑️ Auto-delete: {config.AUTO_DELETE_HOURS} hours\n\n"
-        f"📁 **Channel:** `{config.CHANNEL_ID}`\n"
-        f"💾 **Database:** MongoDB Atlas\n"
-        f"🔗 **Shortener:** VPLinks"
-    )
-
-@app.on_message(filters.command("help") & filters.private)
-async def admin_help(client, message):
-    """Admin help guide"""
-    if message.from_user.id != config.OWNER_ID:
-        return
-    
-    await message.reply(
-        "📖 **Admin Help Guide**\n\n"
-        "**📤 Video Upload:**\n"
-        "• Simply send video file\n"
-        "• Bot automatically processes\n"
-        "• Share link generate hoga\n\n"
-        "**🔄 Bot Switching:**\n"
-        "Agar primary bot ban ho gaya:\n"
-        "1. `/switch backup` command use karo\n"
-        "2. New videos backup bot se share honge\n"
-        "3. Old data safe rahega!\n\n"
-        "**📢 Broadcast:**\n"
-        "1. Message type karo\n"
-        "2. Us message ko reply karo\n"
-        "3. `/broadcast` command type karo\n"
-        "4. Sabko send ho jayega!\n\n"
-        "**📊 Stats:**\n"
-        "`/stats` - Real-time statistics dekho"
+    await m.reply(
+        f"ℹ️ **System Info**\n\n"
+        f"🤖 Admin: @{(await c.get_me()).username}\n"
+        f"📦 Primary: @{PRIMARY_BOT_USERNAME}\n"
+        f"🔄 Backup: @{BACKUP_BOT_USERNAME}\n\n"
+        f"🎯 Active: @{get_bot_username()}"
     )
 
 @app.on_message(filters.video & filters.private)
-async def upload_video(client, message):
-    """Video upload aur link generate karta hai"""
-    if message.from_user.id != config.OWNER_ID:
-        await message.reply("❌ Only admin can upload videos!")
+async def upload(c, m):
+    if m.from_user.id != OWNER_ID:
         return
     
-    status = await message.reply("⏳ **Processing video...**")
+    status = await m.reply("⏳ Uploading...")
     
     try:
-        # Video ko channel mein forward karo
-        forwarded = await message.forward(config.CHANNEL_ID)
+        fwd = await m.forward(CHANNEL_ID)
+        vid_id = generate_id()
         
-        # Unique video ID generate karo
-        video_id = generate_video_id()
+        fname = m.video.file_name or "video.mp4"
+        fsize = m.video.file_size
         
-        # Video details
-        file_name = message.video.file_name or "video.mp4"
-        file_size = message.video.file_size
+        try:
+            videos_db.insert_one({
+                "video_id": vid_id,
+                "message_id": fwd.id,
+                "file_name": fname,
+                "file_size": fsize,
+                "uploaded_at": datetime.now(),
+                "downloads": 0
+            })
+        except:
+            pass
         
-        # Database mein save karo
-        db.save_video(video_id, forwarded.id, file_name, file_size)
+        bot_un = get_bot_username()
+        link = f"https://t.me/{bot_un}?start={vid_id}"
         
-        # Active bot ka username nikalo
-        bot_username = get_bot_username_for_link()
-        
-        # Share link generate karo
-        share_link = f"https://t.me/{bot_username}?start={video_id}"
-        
-        # File size format karo
-        if file_size > 1024*1024*1024:  # GB
-            size_str = f"{file_size/(1024*1024*1024):.2f} GB"
-        elif file_size > 1024*1024:  # MB
-            size_str = f"{file_size/(1024*1024):.2f} MB"
+        if fsize > 1024*1024:
+            size = f"{fsize/(1024*1024):.2f} MB"
         else:
-            size_str = f"{file_size/1024:.2f} KB"
+            size = f"{fsize/1024:.2f} KB"
         
         await status.edit(
-            f"✅ **Video Uploaded Successfully!**\n\n"
-            f"📁 **File:** `{file_name}`\n"
-            f"📊 **Size:** `{size_str}`\n"
-            f"🆔 **Video ID:** `{video_id}`\n\n"
-            f"🔗 **Share Link:**\n`{share_link}`\n\n"
-            f"🤖 **Using Bot:** @{bot_username}\n"
-            f"📤 Share this link with users!"
+            f"✅ **Uploaded!**\n\n"
+            f"📁 {fname}\n"
+            f"📊 {size}\n\n"
+            f"🔗 `{link}`\n\n"
+            f"🤖 @{bot_un}"
         )
-        
-        print(f"✅ Video uploaded: {video_id} - {file_name}")
         
     except Exception as e:
-        await status.edit(
-            f"❌ **Upload Failed!**\n\n"
-            f"Error: `{str(e)}`\n\n"
-            f"Please check:\n"
-            f"• Bot is admin in channel\n"
-            f"• Channel ID is correct"
-        )
-        print(f"❌ Upload error: {e}")
+        await status.edit(f"❌ Error: {e}")
 
-# ========== RUN BOT ==========
-print("🚀 Starting Admin Bot...")
-try:
-    app.run()
-    print("✅ Admin Bot is running!")
-except Exception as e:
-    print(f"❌ Admin Bot error: {e}")
+print("🚀 Starting...")
+app.run()
