@@ -1,232 +1,190 @@
-# -*- coding: utf-8 -*-
-"""
-ADMIN BOT - COMPLETE STANDALONE VERSION
-Sab kuch ek hi file mein - Railway friendly!
-"""
-
 from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pymongo import MongoClient
+import datetime
 import hashlib
-from datetime import datetime
+import os
 import asyncio
-
-# ========== CONFIG ==========
 API_ID = 37067823
 API_HASH = "ed9e62ed4538d2d2b835fb54529c358f"
 ADMIN_BOT_TOKEN = "8596951434:AAF98nta7kfLKqeR9ImT5pUCTZoZ1rLFOwI"
 CHANNEL_ID = -1003777551559
 OWNER_ID = 6549083920
 MONGO_URL = "mongodb+srv://Ajeet:XgGFRFWVT2NwWipw@cluster0.3lxz0p7.mongodb.net/?appName=Cluster0"
+ACTIVE_USER_BOT = "Filling4You_bot"
 
-# Bot settings
-PRIMARY_BOT_USERNAME = "Filling4You_bot"
-BACKUP_BOT_USERNAME = "FiLing4YoU_bot"
+print("🤖 Admin Bot Starting...")
 
-print("=" * 60)
-print("🤖 ADMIN BOT STARTING...")
-print(f"👑 Owner: {OWNER_ID}")
-print(f"📁 Channel: {CHANNEL_ID}")
-print("=" * 60)
+mongo = MongoClient(MONGO_URL)
+db = mongo['fileshare_system']
+files = db['files']
+users = db['users']
+settings = db['settings']
+print("✅ Database connected!")
 
-# ========== DATABASE ==========
-try:
-    client = MongoClient(MONGO_URL, serverSelectionTimeoutMS=5000)
-    db = client['fileshare_dual']
-    videos_db = db['videos']
-    users_db = db['users']
-    settings_db = db['settings']
-    print("✅ Database connected!")
-except Exception as e:
-    print(f"❌ Database error: {e}")
-    # Continue without database for now
-    videos_db = None
-    users_db = None
-    settings_db = None
-
-# ========== BOT ==========
 app = Client("AdminBot", api_id=API_ID, api_hash=API_HASH, bot_token=ADMIN_BOT_TOKEN)
 
-# ========== FUNCTIONS ==========
-
-def generate_id():
-    return hashlib.md5(str(datetime.now().timestamp()).encode()).hexdigest()[:8]
+def generate_file_id():
+    return hashlib.md5(str(datetime.datetime.now()).encode()).hexdigest()[:8]
 
 def get_active_bot():
-    try:
-        s = settings_db.find_one({"key": "active_bot"})
-        return s['value'] if s else "primary"
-    except:
-        return "primary"
+    setting = settings.find_one({"key": "active_user_bot"})
+    if setting:
+        return setting['value']
+    return ACTIVE_USER_BOT
 
-def set_active_bot(bot):
-    try:
-        settings_db.update_one({"key": "active_bot"}, {"$set": {"value": bot}}, upsert=True)
-        return True
-    except:
-        return False
-
-def get_bot_username():
-    active = get_active_bot()
-    return PRIMARY_BOT_USERNAME if active == "primary" else BACKUP_BOT_USERNAME
-
-# ========== COMMANDS ==========
+def set_active_bot(bot_username):
+    settings.update_one({"key": "active_user_bot"}, {"$set": {"value": bot_username}}, upsert=True)
 
 @app.on_message(filters.command("start") & filters.private)
-async def start(c, m):
+async def start_admin(c, m):
     if m.from_user.id != OWNER_ID:
-        await m.reply("🔐 Admin only")
+        await m.reply("🔐 Private admin bot.")
         return
-    
     await m.reply(
-        "👑 **Admin Panel**\n\n"
-        "📤 Send video to upload\n\n"
+        "👑 **Admin Control Panel**\n\n"
+        "📤 Send file to upload\n\n"
         "**Commands:**\n"
         "/stats - Statistics\n"
-        "/switch - Switch bot\n"
-        "/broadcast - Broadcast message\n"
+        "/switch - Switch user bot\n"
         "/info - System info"
     )
 
 @app.on_message(filters.command("stats") & filters.private)
-async def stats(c, m):
+async def stats_admin(c, m):
     if m.from_user.id != OWNER_ID:
         return
-    
-    try:
-        total_videos = videos_db.count_documents({})
-        total_users = users_db.count_documents({})
-    except:
-        total_videos = 0
-        total_users = 0
-    
+    total_files = files.count_documents({})
+    total_users = users.count_documents({})
     await m.reply(
-        f"📊 **Stats**\n\n"
-        f"📹 Videos: {total_videos}\n"
-        f"👥 Users: {total_users}\n"
-        f"🤖 Active: @{get_bot_username()}"
+        f"📊 **Statistics**\n\n"
+        f"📁 Files: `{total_files}`\n"
+        f"👥 Users: `{total_users}`\n"
+        f"🤖 Active Bot: @{get_active_bot()}"
     )
 
 @app.on_message(filters.command("switch") & filters.private)
-async def switch(c, m):
+async def switch_bot(c, m):
     if m.from_user.id != OWNER_ID:
         return
-    
-    args = m.text.split()
-    if len(args) < 2:
+    if len(m.text.split()) < 2:
         await m.reply(
             f"🔄 **Switch Bot**\n\n"
-            f"Current: @{get_bot_username()}\n\n"
-            f"Usage:\n"
-            f"`/switch primary`\n"
-            f"`/switch backup`"
+            f"Usage: /switch bot_username\n\n"
+            f"Example:\n"
+            f"`/switch FiLing4YoU_bot`\n\n"
+            f"Current: @{get_active_bot()}"
         )
         return
-    
-    new_bot = args[1].lower()
-    if new_bot not in ["primary", "backup"]:
-        await m.reply("❌ Use: primary or backup")
-        return
-    
+    new_bot = m.text.split()[1].replace("@", "")
     set_active_bot(new_bot)
-    bot_name = PRIMARY_BOT_USERNAME if new_bot == "primary" else BACKUP_BOT_USERNAME
-    
-    await m.reply(f"✅ Switched to @{bot_name}")
-
-@app.on_message(filters.command("broadcast") & filters.private)
-async def broadcast(c, m):
-    if m.from_user.id != OWNER_ID:
-        return
-    
-    if not m.reply_to_message:
-        await m.reply(
-            "📢 **Broadcast**\n\n"
-            "Reply to a message with `/broadcast`"
-        )
-        return
-    
-    status = await m.reply("📤 Broadcasting...")
-    
-    try:
-        user_ids = [u["user_id"] for u in users_db.find({}, {"user_id": 1})]
-    except:
-        await status.edit("❌ Database error!")
-        return
-    
-    success = 0
-    failed = 0
-    
-    for uid in user_ids:
-        try:
-            await m.reply_to_message.copy(uid)
-            success += 1
-            await asyncio.sleep(0.05)
-        except:
-            failed += 1
-    
-    await status.edit(
-        f"📢 **Complete!**\n\n"
-        f"✅ Success: {success}\n"
-        f"❌ Failed: {failed}"
-    )
+    await m.reply(f"✅ Switched to @{new_bot}")
 
 @app.on_message(filters.command("info") & filters.private)
-async def info(c, m):
+async def info_admin(c, m):
     if m.from_user.id != OWNER_ID:
         return
-    
     await m.reply(
         f"ℹ️ **System Info**\n\n"
-        f"🤖 Admin: @{(await c.get_me()).username}\n"
-        f"📦 Primary: @{PRIMARY_BOT_USERNAME}\n"
-        f"🔄 Backup: @{BACKUP_BOT_USERNAME}\n\n"
-        f"🎯 Active: @{get_bot_username()}"
+        f"🤖 Admin: @FileshareADMINpanel_bot\n"
+        f"📦 Primary: @Filling4You_bot\n"
+        f"🔄 Backup: @FiLing4YoU_bot\n\n"
+        f"🎯 Active: @{get_active_bot()}"
     )
 
-@app.on_message(filters.video & filters.private)
-async def upload(c, m):
+@app.on_message((filters.document | filters.video | filters.audio | filters.photo) & filters.private)
+async def upload_file(c, m):
     if m.from_user.id != OWNER_ID:
         return
     
     status = await m.reply("⏳ Uploading...")
     
     try:
-        fwd = await m.forward(CHANNEL_ID)
-        vid_id = generate_id()
+        forwarded = await m.forward(CHANNEL_ID)
+        file_id = generate_file_id()
         
-        fname = m.video.file_name or "video.mp4"
-        fsize = m.video.file_size
+        file_name = "file"
+        file_size = 0
         
-        try:
-            videos_db.insert_one({
-                "video_id": vid_id,
-                "message_id": fwd.id,
-                "file_name": fname,
-                "file_size": fsize,
-                "uploaded_at": datetime.now(),
-                "downloads": 0
-            })
-        except:
-            pass
+        if m.document:
+            file_name = m.document.file_name
+            file_size = m.document.file_size
+        elif m.video:
+            file_name = "video.mp4"
+            file_size = m.video.file_size
+        elif m.audio:
+            file_name = m.audio.file_name or "audio.mp3"
+            file_size = m.audio.file_size
+        elif m.photo:
+            file_name = "photo.jpg"
         
-        bot_un = get_bot_username()
-        link = f"https://t.me/{bot_un}?start={vid_id}"
+        files.insert_one({
+            "file_id": file_id,
+            "message_id": forwarded.id,
+            "file_name": file_name,
+            "file_size": file_size,
+            "uploaded_at": datetime.datetime.now(),
+            "downloads": 0
+        })
         
-        if fsize > 1024*1024:
-            size = f"{fsize/(1024*1024):.2f} MB"
+        active_bot = get_active_bot()
+        link = f"https://t.me/{active_bot}?start={file_id}"
+        
+        if file_size > 1024*1024:
+            size = f"{file_size/(1024*1024):.2f} MB"
+        elif file_size > 1024:
+            size = f"{file_size/1024:.2f} KB"
         else:
-            size = f"{fsize/1024:.2f} KB"
+            size = f"{file_size} B"
         
         await status.edit(
             f"✅ **Uploaded!**\n\n"
-            f"📁 {fname}\n"
+            f"📁 {file_name}\n"
             f"📊 {size}\n\n"
             f"🔗 `{link}`\n\n"
-            f"🤖 @{bot_un}"
+            f"🤖 @{active_bot}"
         )
         
     except Exception as e:
         await status.edit(f"❌ Error: {e}")
 
-print("🚀 Starting...")
+print("🚀 Starting Admin Bot...")
+@app.on_message(filters.command("broadcast") & filters.private)
+async def broadcast_message(c, m):
+    if m.from_user.id != OWNER_ID:
+        return
+    
+    if len(m.text.split(None, 1)) < 2:
+        await m.reply(
+            "📢 **Broadcast Message**\n\n"
+            "**Usage:**\n"
+            "`/broadcast Your message here`\n\n"
+            "**Example:**\n"
+            "`/broadcast 🎉 New movies uploaded! Check now!`\n\n"
+            "This will send message to ALL users!"
+        )
+        return
+    
+    broadcast_text = m.text.split(None, 1)[1]
+    
+    status = await m.reply("📤 **Broadcasting...**\n\n⏳ Please wait...")
+    
+    all_users = users.find()
+    success = 0
+    failed = 0
+    
+    for user in all_users:
+        try:
+            await c.send_message(user["user_id"], broadcast_text)
+            success += 1
+            await asyncio.sleep(0.05)  # Avoid flood
+        except Exception as e:
+            failed += 1
+            print(f"Failed to send to {user['user_id']}: {e}")
+    
+    await status.edit(
+        f"📢 **Broadcast Complete!**\n\n"
+        f"✅ Success: {success}\n"
+        f"❌ Failed: {failed}\n"
+        f"📊 Total: {success + failed}")
 app.run()
+
