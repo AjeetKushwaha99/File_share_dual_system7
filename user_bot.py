@@ -74,7 +74,7 @@ async def start_user(c, m):
             )
             await m.reply(
                 "🎉 **Verification Successful!**\n\n"
-                "✅ You now have **48 hours** of unlimited access!\n\n"
+                "✅ You now have **26 hours** of unlimited access!\n\n"
                 "📁 Download files without restrictions!"
             )
             print(f"✅ User verified: {user_id}")
@@ -125,6 +125,7 @@ async def start_user(c, m):
             "📌 **Features:**\n"
             "• Fast downloads\n"
             "• 26hr unlimited access\n"
+            " ✅️🤖 How to verify - @fillings4you "
             "• Secure & encrypted\n\n"
             "❓ /help for guide"
         )
