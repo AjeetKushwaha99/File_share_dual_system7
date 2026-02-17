@@ -34,7 +34,7 @@ def is_verified(user_id):
     if not user or not user.get("verified_at"):
         return False
     time_diff = (datetime.datetime.now() - user["verified_at"]).total_seconds()
-    return time_diff < 172800
+    return time_diff < 93600
 
 def shorten_url(url):
     try:
@@ -124,7 +124,7 @@ async def start_user(c, m):
             "🤖 **Premium File Sharing Bot**\n\n"
             "📌 **Features:**\n"
             "• Fast downloads\n"
-            "• 48hr unlimited access\n"
+            "• 26hr unlimited access\n"
             "• Secure & encrypted\n\n"
             "❓ /help for guide"
         )
@@ -136,8 +136,9 @@ async def help_user(c, m):
         "**Download Files:**\n"
         "1️⃣ Click file link\n"
         "2️⃣ Verify (one-time)\n"
-        "3️⃣ Get 48hr access\n"
+        "3️⃣ Get 26hr access\n"
         "4️⃣ Download freely!\n\n"
+        " ✅️🤖 How to verify - @fillings4you "
         "**Verification expired?**\n"
         "Simply verify again!"
     )
@@ -149,6 +150,7 @@ async def about_user(c, m):
         "🤖 Premium File Sharing Bot\n"
         "📥 Fast & Secure Downloads\n"
         "🔐 Private & Encrypted\n\n"
+        "✅️🤖 How to verify - @fillings4you"
         "Thank you for using! ❤️"
     )
 
