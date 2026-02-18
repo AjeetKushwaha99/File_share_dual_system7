@@ -90,7 +90,8 @@ async def start_user(c, m):
             
             await m.reply(
                 "🔐 **Verification Required**\n\n"
-                "Complete quick verification for 48hr access!\n\n"
+                "Complete quick verification for 26hr access!\n\n"
+                " ✅️🤖 How to verify - @fillings4you "
                 "👇 Click below:",
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton("✅ Verify Now", url=short_link)
