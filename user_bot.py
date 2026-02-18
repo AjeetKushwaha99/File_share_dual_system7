@@ -86,6 +86,7 @@ async def start_user(c, m):
             short_link = shorten_url(verify_url)
             
             print(f"🔐 Verification required for {user_id}")
+            print(f" ✅️🤖 How to verify - @fillings4you ") 
             print(f"🔗 Verify link: {short_link}")
             
             await m.reply(
